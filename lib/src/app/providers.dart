@@ -7,6 +7,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
 
 import '../data/models/budget_model.dart';
 import '../data/models/category_model.dart';
@@ -70,6 +72,7 @@ class AppStateNotifier extends Notifier<AppState> {
 
   Future<void> _boot() async {
     await ref.read(repositoryProvider).seedDefaults();
+    tz_data.initializeTimeZones();
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: android);
     await _notifications.initialize(initSettings);
@@ -192,12 +195,28 @@ class AppStateNotifier extends Notifier<AppState> {
       ),
     );
 
-    await _notifications.showDailyAtTime(
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled = tz.TZDateTime(
+      tz.local,
+      now.year,
+      now.month,
+      now.day,
+      time.hour,
+      time.minute,
+    );
+
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+
+    await _notifications.zonedSchedule(
       101,
       'Track your spending',
       'Don\'t forget to log today\'s expenses.',
-      Time(time.hour, time.minute, 0),
+      scheduled,
       details,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
     );
   }
 

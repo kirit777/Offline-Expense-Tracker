@@ -11,13 +11,16 @@ class ExpenseTrackerApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final appState = ref.watch(appStateProvider);
+    final modeIndex = appState.settings.themeMode;
+    final themeMode =
+        modeIndex >= 0 && modeIndex < ThemeMode.values.length ? ThemeMode.values[modeIndex] : ThemeMode.system;
 
     return MaterialApp.router(
       title: 'Offline Expense Tracker',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      themeMode: ThemeMode.values[appState.settings.themeMode],
+      themeMode: themeMode,
       routerConfig: appRouter,
     );
   }

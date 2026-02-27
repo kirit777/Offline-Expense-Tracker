@@ -22,7 +22,9 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<ThemeMode>(
-            value: ThemeMode.values[state.settings.themeMode],
+            value: state.settings.themeMode >= 0 && state.settings.themeMode < ThemeMode.values.length
+                ? ThemeMode.values[state.settings.themeMode]
+                : ThemeMode.system,
             decoration: const InputDecoration(labelText: 'Theme'),
             items: ThemeMode.values.map((m) => DropdownMenuItem(value: m, child: Text(m.name))).toList(),
             onChanged: (m) => ref.read(appStateProvider.notifier).setThemeMode(m!),
