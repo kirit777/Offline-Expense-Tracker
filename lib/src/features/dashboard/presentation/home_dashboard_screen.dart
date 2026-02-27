@@ -1,131 +1,226 @@
+import 'dart:ui';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../../app/providers.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/ads/ads_manager.dart';
+import '../../../core/ads/banner_ad_widget.dart';
 import '../../../data/models/transaction_type.dart';
-import '../../shared/widgets/amount_text.dart';
-import '../../shared/widgets/premium_card.dart';
-import '../../transactions/presentation/add_edit_transaction_screen.dart';
 
-class HomeDashboardScreen extends ConsumerWidget {
+class HomeDashboardScreen extends ConsumerStatefulWidget {
   const HomeDashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(appStateProvider);
-    final monthTx = state.transactions.where((tx) => tx.date.month == DateTime.now().month && tx.date.year == DateTime.now().year).toList();
-    final income = monthTx.where((e) => e.type == TransactionType.income).fold<double>(0, (s, e) => s + e.amount);
-    final expense = monthTx.where((e) => e.type == TransactionType.expense).fold<double>(0, (s, e) => s + e.amount);
-    final savings = income - expense;
+  ConsumerState<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
+}
 
-    return CustomScrollView(
-      slivers: [
-        SliverAppBar(
-          pinned: true,
-          title: Text(DateFormat.yMMMM().format(DateTime.now())),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.all(16),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate([
-              PremiumCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+class _HomeDashboardScreenState extends ConsumerState<HomeDashboardScreen> {
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _isLoading = false);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AdsManager.instance.showInterstitialAd();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) return const _DashboardSkeleton();
+
+    final state = ref.watch(appStateProvider);
+    final txs = state.transactions;
+    final currency = NumberFormat.currency(symbol: '${state.settings.currency} ');
+
+    final income = txs
+        .where((t) => t.type == TransactionType.income)
+        .fold<double>(0, (sum, item) => sum + item.amount);
+    final expense = txs
+        .where((t) => t.type == TransactionType.expense)
+        .fold<double>(0, (sum, item) => sum + item.amount);
+
+    return RepaintBoundary(
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _BalanceCard(balance: income - expense, income: income, expense: expense, formatter: currency),
+          const SizedBox(height: 16),
+          _InsightChart(income: income, expense: expense),
+          const SizedBox(height: 16),
+          const Align(alignment: Alignment.center, child: BannerAdWidget()),
+        ],
+      ),
+    );
+  }
+}
+
+class _BalanceCard extends StatelessWidget {
+  const _BalanceCard({required this.balance, required this.income, required this.expense, required this.formatter});
+
+  final double balance;
+  final double income;
+  final double expense;
+  final NumberFormat formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: balance),
+      duration: const Duration(milliseconds: 900),
+      curve: Curves.easeOutCubic,
+      builder: (_, value, __) {
+        return Card(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.shadow,
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Total Balance', style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.88))),
+                const SizedBox(height: 8),
+                Text(
+                  formatter.format(value),
+                  style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700, color: theme.colorScheme.onPrimary),
+                ),
+                const SizedBox(height: 20),
+                Row(
                   children: [
-                    Text('Balance', style: Theme.of(context).textTheme.labelLarge),
-                    Text('${state.settings.currency} ${savings.toStringAsFixed(2)}', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        AmountText(amount: income, type: TransactionType.income, currency: state.settings.currency),
-                        AmountText(amount: expense, type: TransactionType.expense, currency: state.settings.currency),
-                      ],
-                    ),
+                    Expanded(child: _MetricPill(label: 'Income', value: formatter.format(income))),
+                    const SizedBox(width: 8),
+                    Expanded(child: _MetricPill(label: 'Expense', value: formatter.format(expense))),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MetricPill extends StatelessWidget {
+  const _MetricPill({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          color: Colors.white.withValues(alpha: 0.16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 4),
+              Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightChart extends StatelessWidget {
+  const _InsightChart({required this.income, required this.expense});
+
+  final double income;
+  final double expense;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = (income + expense).clamp(1, double.infinity);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Spending Insight', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 180,
+              child: PieChart(
+                PieChartData(
+                  sectionsSpace: 3,
+                  centerSpaceRadius: 42,
+                  sections: [
+                    PieChartSectionData(value: income / total * 100, color: Theme.of(context).colorScheme.primary, title: 'Income'),
+                    PieChartSectionData(value: expense / total * 100, color: Theme.of(context).colorScheme.tertiary, title: 'Expense'),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              PremiumCard(
-                child: SizedBox(
-                  height: 190,
-                  child: BarChart(
-                    BarChartData(
-                      barGroups: [
-                        BarChartGroupData(x: 0, barRods: [BarChartRodData(toY: income, color: AppTheme.income)]),
-                        BarChartGroupData(x: 1, barRods: [BarChartRodData(toY: expense, color: AppTheme.expense)]),
-                      ],
-                      titlesData: FlTitlesData(
-                        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 44)),
-                        bottomTitles: AxisTitles(
-                          sideTitles: SideTitles(
-                            showTitles: true,
-                            getTitlesWidget: (value, meta) => Text(value == 0 ? 'Income' : 'Expense'),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              PremiumCard(
-                child: SizedBox(
-                  height: 200,
-                  child: PieChart(
-                    PieChartData(
-                      sections: state.categories
-                          .map(
-                            (c) => PieChartSectionData(
-                              color: Color(c.colorValue),
-                              value: monthTx.where((tx) => tx.categoryId == c.id).fold<double>(0, (s, e) => s + e.amount),
-                              title: c.name,
-                              radius: 58,
-                            ),
-                          )
-                          .where((e) => e.value > 0)
-                          .toList(),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text('Recent Transactions', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              ...state.transactions.take(8).map(
-                    (tx) => Dismissible(
-                      key: ValueKey(tx.id),
-                      background: Container(color: Colors.redAccent),
-                      secondaryBackground: Container(color: Colors.blueAccent),
-                      confirmDismiss: (dir) async {
-                        if (dir == DismissDirection.startToEnd) {
-                          await ref.read(appStateProvider.notifier).deleteTransaction(tx.id);
-                          return true;
-                        }
-                        await ref.read(appStateProvider.notifier).duplicateTransaction(tx);
-                        return false;
-                      },
-                      child: ListTile(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        tileColor: Theme.of(context).colorScheme.surface,
-                        leading: CircleAvatar(
-                          backgroundColor: Color(state.categories.firstWhere((c) => c.id == tx.categoryId).colorValue).withValues(alpha: 0.2),
-                          child: Icon(IconData(state.categories.firstWhere((c) => c.id == tx.categoryId).iconCodePoint, fontFamily: 'MaterialIcons')),
-                        ),
-                        title: Text(tx.title),
-                        subtitle: Text(DateFormat.yMd().add_jm().format(tx.date)),
-                        trailing: AmountText(amount: tx.amount, type: tx.type, currency: state.settings.currency),
-                        onLongPress: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AddEditTransactionScreen(existing: tx))),
-                      ),
-                    ),
-                  ),
-            ]),
-          ),
+            ),
+          ],
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _DashboardSkeleton extends StatelessWidget {
+  const _DashboardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+      highlightColor: Theme.of(context).colorScheme.surface,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: const [
+          _SkelBox(height: 210),
+          SizedBox(height: 16),
+          _SkelBox(height: 230),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkelBox extends StatelessWidget {
+  const _SkelBox({required this.height});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
     );
   }
 }
